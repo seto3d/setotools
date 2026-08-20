@@ -222,6 +222,26 @@ bpy.ops.mesh.primitive_cube_add(size=2)
 for cls in panels:
     draw_panel(cls, "sollumz ok")
 
+print("=== the Shadow Map Baker with a message to show ===")
+# The message rows only exist when a run left one behind, so the pass above
+# drew neither. That is the shape of bug this file was written for: a panel
+# that is green on every logic test and explodes the first time something
+# goes wrong and it has to say so.
+shadow = bpy.context.scene.seto_shadow_map
+try:
+    for label, error, warning in (
+            ("error only", "Cycles is disabled - baking needs it.", ""),
+            ("warning only", "", "Denoise / Soften did not run."),
+            ("both", "something stopped it", "and something degraded it")):
+        shadow.last_error = error
+        shadow.last_warning = warning
+        for cls in panels:
+            if "shadow_map" in cls.bl_idname:
+                draw_panel(cls, label)
+finally:
+    shadow.last_error = ""
+    shadow.last_warning = ""
+
 print("=== Ambient Occlusion's Bevel block, in every state ===")
 # The pass above only saw the default (on, Source + Strip). Each target draws
 # its own warnings, and switching the block off greys out a different branch.

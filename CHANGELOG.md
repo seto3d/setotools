@@ -22,7 +22,13 @@ black and white, gamma - which are live and **do not re-bake**, so the
 expensive half happens once and dialling the contrast in afterwards is free.
 Nothing reaches disk until Save Changes to Disk.
 
-Contributed by @cs-dev-09.
+Denoise and Soften had never actually run. The compositor pass read its result from `Render Result`, whose pixels Blender does not expose to Python - it came back empty, the read failed, and the failure was caught and printed to the console, so every map was the raw bake with the console quietly saying `expected sequence size 0`. It reads a Viewer node now. Soften's default drops from 10 to 1 to suit a blur that finally happens.
+
+The panel says so when Cycles is switched off, since it is an add-on and the bake dies on a traceback without it - and it now says Get Extensions, where Cycles has actually lived since 4.2, rather than sending people to an Add-ons list that has no such entry. Two earlier versions of that check were wrong in opposite directions: one asked whether `CYCLES` was among the render engine's enum items, which is a dynamic enum listing only EEVEE, so it refused every bake on every machine; the other assigned the engine and compared afterwards, which never gets there because assigning an unregistered engine raises. It asks the scene for its `cycles` settings now.
+
+Anything that degrades a bake now says so in the panel. The denoise bug above hid for a release because its failure went to `print()` and Blender does not open a console by default - the bake reported success either way. There are two message rows now: red for what stopped the run, plain for what went wrong while it still produced a usable map, and both can be dismissed. A message no longer outlives the run that wrote it: prepare and bake clear it on the way in, so a complaint from an earlier session cannot sit in the panel for the life of the .blend with nothing able to clear it.
+
+Contributed by @cs-dev-09 ([#4](https://github.com/seto3d/void-tools/pull/4), [#6](https://github.com/seto3d/void-tools/pull/6)).
 
 > 1.2.3 carried this fix and was withdrawn within the hour: it repaired the
 > paths from `register()`, and `bpy.data` is restricted while Blender loads

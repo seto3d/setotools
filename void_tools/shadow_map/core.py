@@ -199,6 +199,20 @@ def update_levels(self, context):
 #   Operators
 # ---------------------------------------------------------------------------
 
+class SETO_OT_clear_shadow_message(bpy.types.Operator):
+    """Dismiss the message the last run left behind."""
+
+    bl_idname = "seto.clear_shadow_message"
+    bl_label = "Dismiss"
+    bl_description = "Clear the message left by the last prepare or bake"
+
+    def execute(self, context):
+        settings = context.scene.seto_shadow_map
+        settings.last_error = ""
+        settings.last_warning = ""
+        return {'FINISHED'}
+
+
 class SETO_OT_save_shadow_levels(bpy.types.Operator):
     """Persist the current invert / levels adjustments to disk."""
 
@@ -358,7 +372,14 @@ class SETO_PG_shadow_map(bpy.types.PropertyGroup):
         description="Output folder for the shadow map. Use // to save next to the .blend file",
         default="//",
     )
+    # Why two. `last_error` is for what stopped the run; `last_warning` is for
+    # what went wrong while the run still produced a usable map. The denoise /
+    # blur pass was broken for a whole release because its failure went to
+    # `print()` - a console Blender does not open by default - so the bake
+    # reported success and quietly handed back the raw map every time. Anything
+    # that degrades the result now says so where the user is already looking.
     last_error: StringProperty(default="", options={'HIDDEN'})
+    last_warning: StringProperty(default="", options={'HIDDEN'})
 
 
 # ---------------------------------------------------------------------------
@@ -451,11 +472,22 @@ class SETO_PT_shadow_map_panel(bpy.types.Panel):
         row.scale_y = 1.2
         row.operator("seto.bake_shadow_map", icon='TEXTURE')
 
-        # Persistent error display
-        if settings.last_error:
-            warn = layout.box()
-            warn.alert = True
-            warn.label(text=settings.last_error, icon='ERROR')
+        # What the last run had to say. Both survive until the next run or
+        # until dismissed, so a message cannot be missed by looking away - but
+        # they are dismissable, or a stale one sits there for the life of the
+        # .blend with nothing able to clear it.
+        for message, alert, icon in (
+            (settings.last_error, True, 'ERROR'),
+            (settings.last_warning, False, 'INFO'),
+        ):
+            if not message:
+                continue
+            box = layout.box()
+            box.alert = alert
+            row = box.row(align=True)
+            row.label(text=message, icon=icon)
+            row.operator("seto.clear_shadow_message", text="", icon='X',
+                         emboss=False)
 
 
 # ---------------------------------------------------------------------------
@@ -482,6 +514,8 @@ class SETO_OT_prepare_shadow_mesh(bpy.types.Operator):
 
     def execute(self, context):
         settings = context.scene.seto_shadow_map
+        settings.last_error = ""
+        settings.last_warning = ""
 
         try:
             if context.active_object and context.active_object.mode != 'OBJECT':
@@ -598,6 +632,31 @@ class SETO_OT_prepare_shadow_mesh(bpy.types.Operator):
 #   Compositor Post-Processing (Denoise / Blur)
 # ---------------------------------------------------------------------------
 
+def _cycles_available(scene):
+    """Whether Cycles is here to bake with.
+
+    Two ways of asking this have already shipped and neither worked.
+
+    Its enum items - ``'CYCLES' in engine.enum_items`` - cannot work at all:
+    ``engine`` is a dynamic enum whose RNA definition carries only the
+    placeholder ``BLENDER_EEVEE``, enabled or not, asked of the type or of a
+    live scene. It reported Cycles missing on every machine and refused every
+    bake, which is the worst direction to be wrong in: it blames the user for
+    a setting that is already correct.
+
+    Assign-then-compare cannot work either, and for the opposite reason.
+    Assigning an engine that is not registered does not quietly leave the old
+    value in place - it raises ``TypeError`` out of RNA - so the comparison
+    after it is never reached and the panel shows the traceback text.
+
+    So ask the scene. Cycles registers ``scene.cycles`` while it is enabled
+    and takes it away when it is not, and that is the same settings block the
+    sample count is written to below - the thing the bake actually needs
+    rather than a stand-in for it.
+    """
+    return hasattr(scene, "cycles")
+
+
 def _compositor_post_process(img, context, use_denoise, blur_radius):
     """Run the baked image through Blender's compositor for denoising and blur.
 
@@ -657,12 +716,20 @@ def _compositor_post_process(img, context, use_denoise, blur_radius):
     pixels = None
     try:
         bpy.ops.render.render(write_still=False)
+        # Read the Viewer node rather than 'Render Result': Blender does not
+        # expose the latter's pixels to Python, so the read came back empty and
+        # the whole post-process was skipped in silence for a release.
         result_img = bpy.data.images.get('Viewer Node')
-        if result_img and len(result_img.pixels) > 0:
+        if result_img and tuple(result_img.size) == (width, height):
             pixels = np.empty(width * height * 4, dtype=np.float32)
             result_img.pixels.foreach_get(pixels)
         else:
-            print("[ShadowMap] Viewer Node image not found or empty.")
+            # Returning None is not a detail the caller may swallow - it warns.
+            print(
+                "[ShadowMap] Viewer Node image missing or the wrong size: "
+                f"{tuple(result_img.size) if result_img else None} "
+                f"!= {(width, height)}"
+            )
     finally:
         context.window.scene = orig_scene
         bpy.data.objects.remove(cam_obj)
@@ -723,6 +790,12 @@ class SETO_OT_bake_shadow_map(bpy.types.Operator):
     def execute(self, context):
         settings = context.scene.seto_shadow_map
         obj = context.active_object
+
+        # Start clean: whatever is on screen is about to be answered by this
+        # run, and a message from an earlier one reads as a live complaint.
+        settings.last_error = ""
+        settings.last_warning = ""
+        warnings = []
 
         # --- Validate material setup ---
         if not obj.data.materials:
@@ -786,17 +859,19 @@ class SETO_OT_bake_shadow_map(bpy.types.Operator):
             sun_obj.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
 
         try:
-            # Blender baking requires Cycles. Attempt to switch to it, then
-            # verify — Blender silently ignores invalid engine names rather
-            # than raising an exception.
-            scene.render.engine = 'CYCLES'
-            if scene.render.engine != 'CYCLES':
+            # Baking needs Cycles, and Cycles can be switched off. Ask before
+            # assigning the engine: assignment does not silently fail, it
+            # raises a TypeError from deep in RNA, and the panel would show
+            # that instead of something the user can act on.
+            if not _cycles_available(scene):
                 settings.last_error = (
-                    "Cycles is disabled - baking needs it. "
-                    "Edit > Preferences > Get Extensions, search 'Cycles Render Engine', install/tick it."
+                    "Cycles is disabled - baking needs it. Edit > Preferences "
+                    "> Get Extensions, search 'Cycles Render Engine', enable it."
                 )
                 self.report({'ERROR'}, settings.last_error)
                 return {'CANCELLED'}
+
+            scene.render.engine = 'CYCLES'
 
             # CUSTOM mode uses the scene's existing render settings as-is;
             # AO and SUN modes override them with the addon's own values.
@@ -834,8 +909,17 @@ class SETO_OT_bake_shadow_map(bpy.types.Operator):
                     if processed is not None:
                         img.pixels.foreach_set(processed)
                         img.update()
+                    else:
+                        warnings.append(
+                            "Denoise / Soften did not run - the compositor "
+                            "returned nothing. This map is the raw bake."
+                        )
                 except Exception as e:
                     print(f"[ShadowMap] Post-process failed: {e}")
+                    warnings.append(
+                        f"Denoise / Soften failed ({type(e).__name__}). "
+                        "This map is the raw bake."
+                    )
 
             bake_elapsed = time.time() - bake_start
 
@@ -899,8 +983,10 @@ class SETO_OT_bake_shadow_map(bpy.types.Operator):
 
             # --- Assign Sollumz decal_dirt material if available ---
             sollumz_warning = self._assign_sollumz_material(context, obj, img)
+            if sollumz_warning:
+                warnings.append(sollumz_warning)
 
-            settings.last_error = sollumz_warning or ""
+            settings.last_warning = "  ".join(warnings)
             self.report(
                 {'INFO'},
                 f"Saved shadowmap to {filepath}  |  {bake_elapsed:.1f}s bake",
@@ -986,6 +1072,7 @@ class SETO_OT_bake_shadow_map(bpy.types.Operator):
 classes = (
     SETO_PG_shadow_map,
     SETO_OT_save_shadow_levels,
+    SETO_OT_clear_shadow_message,
     SETO_PT_shadow_map_panel,
     SETO_OT_prepare_shadow_mesh,
     SETO_OT_bake_shadow_map,
