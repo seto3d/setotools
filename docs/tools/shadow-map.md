@@ -9,6 +9,24 @@ into the asset before it ever ships.
 
 Your mesh is not touched — the bake lands on a duplicate.
 
+## Watch it work
+
+<video controls muted playsinline preload="none"
+       poster="../../images/shadow-map-poster.jpg"
+       style="width:100%;border-radius:.2rem">
+  <source src="https://github.com/seto3d/void-tools/releases/download/media/shadow-map.mp4" type="video/mp4">
+  <a href="https://github.com/seto3d/void-tools/releases/download/media/shadow-map.mp4">Download the video</a>
+</video>
+
+*A whole bake, start to finish: preparing the shadow mesh, baking ambient
+occlusion, then pulling the result into shape with Levels - which does not
+re-bake, so the contrast is dialled in for free.*
+
+![The baked shadow in game, under a crate](../images/shadow-map-in-game.jpg)
+
+*The same bake in game. An MLO gets almost no real-time shadow indoors, so
+without this the crate floats.*
+
 ## The three steps
 
 The panel is deliberately in this order, and each button needs the one before

@@ -32,7 +32,7 @@ tool, troubleshooting. Built from [`docs/`](docs) in this repo.
 | [Pre-Flight](void_tools/preflight) | The export test you would otherwise run in game — missing UVs, unapplied scale, non-DDS textures | the whole scene, read-only |
 | [Trash Scatter](void_tools/scatter) | Vanilla GTA litter scattered over a floor as MLO entities — dense along the walls, seeded, spaced — plus a procedural Floor Dirt overlay, the flat grime sheet vanilla interiors use | selected faces |
 
-## What's new in 1.2.2
+## What's new in 1.2.3
 
 <!-- This section carries THIS release only. On the next one, replace it -
      the older clips stay on their own tool pages in the documentation, which
@@ -40,20 +40,33 @@ tool, troubleshooting. Built from [`docs/`](docs) in this repo.
      GIFs rather than links: GitHub strips <video> from Markdown and turns a
      linked .mp4 into a plain link nobody clicks, but it plays a GIF inline. -->
 
-![Sign Glow tracing a halo behind 3D lettering](docs/images/sign-glow.gif)
+![Levels pulling a raw bake into a contact shadow, without re-baking](docs/images/shadow-map.gif)
 
-**Sign Glow** — an emissive halo traced from the lettering's own silhouette,
-on one quad behind it. How a sign reads at night without a single light being
-placed. Contributed by [Molo Modding](https://github.com/molossen).
+**Shadow Map Baker** — the light in a room, baked into a texture and put back
+on a copy of the surface as a `decal_dirt` decal. That is how GTA's own
+interiors have shadow at all: an MLO gets almost none in real time, so it is
+painted into the asset first. Ambient occlusion needs no lights and reads as
+contact shadow anywhere; a sun you aim by angle and altitude; or the lights you
+placed yourself. Then **Levels** — invert, black and white points, gamma —
+live, and without re-baking, so the expensive half happens once. Contributed by
+[@cs-dev-09](https://github.com/cs-dev-09).
 
-![Vertex Color Bake running over a whole collection](docs/images/vertex-color-bake-collection.gif)
+Denoise and Soften had never actually run: the compositor read its result from
+`Render Result`, whose pixels Blender does not expose to Python, and the
+failure went to a console Blender does not open. Anything that degrades a bake
+now says so in the panel instead.
 
-**Vertex Color Bake** — a whole collection baked in one press, with the
-gradient fading between two colours. Ambient occlusion and the fake sun now
-cast across the scene too, so a crate darkens the wall it stands against.
+**Two things that broke updating are fixed.** The Update button could not
+install any real update, because the release became an extension package and
+the updater only knew the old add-on shape. And textures came back pink after
+an update, because Blender records where an image came from as an absolute
+path — every scene made with the bundled textures named the folder the add-on
+happened to be installed in at the time.
 
-**The full videos play in the [documentation](https://seto3d.github.io/void-tools/)**,
-on each tool's own page — these are seven-second cuts.
+![The same bake in game, under a crate](docs/images/shadow-map-in-game.jpg)
+
+**The full video plays in the [documentation](https://seto3d.github.io/void-tools/tools/shadow-map/)**
+— the whole bake, start to finish. This is a six-second cut.
 
 > **No prop library? Trash Scatter still works.** The add-on ships no GTA
 > models — only their names and their measured sizes, which is what placement

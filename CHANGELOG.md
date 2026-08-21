@@ -2,7 +2,7 @@
 
 All notable changes to Void Tools.
 
-## 1.2.4 — bundled textures find themselves again *(unreleased)*
+## 1.2.3 — the room's own light, baked in
 
 ### Added - Shadow Map Baker
 
@@ -30,7 +30,7 @@ Anything that degrades a bake now says so in the panel. The denoise bug above hi
 
 Contributed by @cs-dev-09 ([#4](https://github.com/seto3d/void-tools/pull/4), [#6](https://github.com/seto3d/void-tools/pull/6)).
 
-> 1.2.3 carried this fix and was withdrawn within the hour: it repaired the
+> A first build of this fix was withdrawn within the hour: it repaired the
 > paths from `register()`, and `bpy.data` is restricted while Blender loads
 > add-ons, so the add-on failed to register and the tab did not appear at all.
 > The repair now runs from a zero-interval timer instead, once the event loop

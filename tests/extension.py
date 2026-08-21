@@ -25,6 +25,7 @@ Four things here would each break it silently:
 Run `python scripts/build_extension.py --blender <exe>` first; without the
 build this reports what is missing and stops.
 """
+import ast
 import json
 import os
 import shutil
@@ -58,6 +59,15 @@ def finish():
 
 sys.path.insert(0, os.path.join(REPO, "scripts"))
 import build_extension  # noqa: E402
+
+
+def _release_order(version):
+    """`"1.2.10"` sorts after `"1.2.9"`, which it does not as a string."""
+    try:
+        return tuple(int(part) for part in version.split("."))
+    except ValueError:
+        return ()
+
 
 VERSION = ".".join(str(part) for part in build_extension.bl_info()["version"])
 ARCHIVE = os.path.join(REPO, "dist", build_extension.ARCHIVE_NAME)
@@ -96,14 +106,60 @@ if os.path.exists(INDEX):
         entry = entries[0]
         check("under the id Blender will install it as",
               entry.get("id") == build_extension.EXTENSION_ID, entry.get("id"))
-        check("at the version that was built",
-              entry.get("version") == VERSION, entry.get("version"))
+        # The listing may lag the working tree and that is correct: it
+        # names the version people can actually download, and an
+        # unreleased one has no tag behind it yet. Ahead is the failure -
+        # a listing naming a release that does not exist hands a 404 to
+        # everyone whose Blender checks for an update.
+        listed = entry.get("version", "")
+        check("at a version that has been released - the listing may lag "
+              "the build, never lead it",
+              _release_order(listed) <= _release_order(VERSION),
+              f"listed {listed}, built {VERSION}")
         url = entry.get("archive_url", "")
+        check("under the tag that carries it - the listing's own version "
+              "and the tag in its URL cannot disagree",
+              f"/download/v{listed}/" in url, url)
         check("and the archive it points at is the release asset, absolute - "
               "a relative URL would mean serving binaries from the docs site",
               url.startswith("https://github.com/seto3d/void-tools/releases/download/")
               and url.endswith(build_extension.ARCHIVE_NAME), url)
 
+
+print("=== the build does not publish the listing on its own ===")
+# The flag used to be advice rather than a guard: the write ran on every
+# build while the message still said it had not, so a test build of an
+# unreleased version was committed with the code and everyone who checked
+# for an update got a 404. Read from the source rather than by running the
+# build, which needs a second Blender and a minute.
+BUILD_SOURCE = os.path.join(REPO, "scripts", "build_extension.py")
+with open(BUILD_SOURCE, encoding="utf-8") as handle:
+    build_tree = ast.parse(handle.read())
+
+
+def _writes_listing(node):
+    """Does `node` contain the `open(published, "w")` that writes it?"""
+    for sub in ast.walk(node):
+        if (isinstance(sub, ast.Call)
+                and getattr(sub.func, "id", "") == "open"
+                and sub.args and getattr(sub.args[0], "id", "") == "published"):
+            return True
+    return False
+
+
+writes = [n for n in ast.walk(build_tree) if _writes_listing(n)
+          and isinstance(n, (ast.With, ast.Expr))]
+guarded = [n for n in ast.walk(build_tree)
+           if isinstance(n, ast.If)
+           and isinstance(n.test, ast.Attribute) and n.test.attr == "publish"
+           and _writes_listing(n)]
+check("docs/repo/index.json is written only under `if args.publish` - a "
+      "build that writes it every time advertises a release nobody made",
+      len(guarded) == 1, f"{len(guarded)} guarded write(s)")
+check("and nothing writes it outside that guard",
+      bool(guarded) and all(
+          any(w in ast.walk(g) for g in guarded) for w in writes),
+      f"{len(writes)} write statement(s)")
 print("=== it installs, and answers to its extension name ===")
 # The legacy copy has to go first: both register the same SETO_* classes, and
 # two of them in one Blender is the crash this project has written down.

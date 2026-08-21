@@ -214,11 +214,17 @@ def main():
         entry_file = os.path.basename(entry.get("archive_url", filename))
         entry["archive_url"] = RELEASE_ASSET.format(
             version=entry.get("version", version), filename=entry_file)
-    os.makedirs(DOCS_REPO, exist_ok=True)
+    # Gated on --publish, and the guard belongs here rather than in the
+    # caller's discipline: this wrote the listing on every build once, with
+    # the message below still reporting that it had not, and a test build of
+    # an unreleased version went out with the code and 404'd everyone who
+    # checked for an update.
     published = os.path.join(DOCS_REPO, "index.json")
-    with open(published, "w", encoding="utf-8") as handle:
-        json.dump(index, handle, indent=2)
-        handle.write("\n")
+    if args.publish:
+        os.makedirs(DOCS_REPO, exist_ok=True)
+        with open(published, "w", encoding="utf-8") as handle:
+            json.dump(index, handle, indent=2)
+            handle.write("\n")
 
     print(f"{os.path.relpath(output, ROOT)}: {len(names)} files, {version}")
     print(f"  {os.path.getsize(output) / 1024:.0f} KB")

@@ -4,7 +4,7 @@ bl_info = {
     # Public versioning starts at 1.0.0 with the launch. The changelog's
     # 0.2-1.9 entries were private development builds that never shipped;
     # their numbers stay in the log as history, not as releases.
-    "version": (1, 2, 4),
+    "version": (1, 2, 3),
     "blender": (4, 2, 0),
     "location": "View3D > N-Panel > Void Tools",
     # Blender turns these two into the Documentation and Report a Bug buttons
